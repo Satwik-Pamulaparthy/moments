@@ -1,7 +1,10 @@
+import os
+import requests
 from flask import Blueprint, abort, current_app, flash, redirect, render_template, request, send_from_directory, url_for
 from flask_login import current_user, login_required
 from sqlalchemy import func, select
 from sqlalchemy.orm import with_parent
+from dotenv import load_dotenv
 
 from moments.core.extensions import db
 from moments.decorators import confirm_required, permission_required
@@ -9,8 +12,12 @@ from moments.forms.main import CommentForm, DescriptionForm, TagForm
 from moments.models import Collection, Comment, Follow, Notification, Photo, Tag, User
 from moments.notifications import push_collect_notification, push_comment_notification
 from moments.utils import flash_errors, redirect_back, rename_image, resize_image, validate_image
+from moments.azure_vision import generate_caption, generate_tags
+
+load_dotenv()
 
 main_bp = Blueprint('main', __name__)
+
 
 
 @main_bp.route('/')
@@ -122,23 +129,72 @@ def get_avatar(filename):
 @login_required
 @confirm_required
 @permission_required('UPLOAD')
+
 def upload():
     if request.method == 'POST':
+        # Check if the file is part of the request
         if 'file' not in request.files:
-            return 'No image.', 400
+            flash('No image uploaded.', 'danger')
+            return redirect(url_for('.upload'))
+
         f = request.files.get('file')
+
+        # Validate the image format
         if not validate_image(f.filename):
-            return 'Invalid image.', 400
+            flash('Invalid image format.', 'danger')
+            return redirect(url_for('.upload'))
+
+        # Rename the image and save it to the upload directory
         filename = rename_image(f.filename)
-        f.save(current_app.config['MOMENTS_UPLOAD_PATH'] / filename)
+        file_path = current_app.config['MOMENTS_UPLOAD_PATH'] / filename
+        f.save(file_path)
+
+        # Generate caption and tags using Azure Vision API
+        caption = generate_caption(file_path)  # Get caption (description)
+        tags = generate_tags(file_path)  # Get tags
+
+        # If no caption or tags are generated, default to empty
+        if caption is None:
+            caption = ""  # Default caption if none is generated
+
+        if tags is None:
+            tags = []  # Default tags if none are generated
+
+        # Resize the image to different sizes
         filename_s = resize_image(f, filename, current_app.config['MOMENTS_PHOTO_SIZES']['small'])
         filename_m = resize_image(f, filename, current_app.config['MOMENTS_PHOTO_SIZES']['medium'])
+
+        # Create the photo object
         photo = Photo(
-            filename=filename, filename_s=filename_s, filename_m=filename_m, author=current_user._get_current_object()
+            filename=filename,
+            filename_s=filename_s,
+            filename_m=filename_m,
+            author=current_user._get_current_object(),
+            description=caption  # Use caption if available, otherwise empty string
         )
+
+        # Add tags to the photo
+        for tag_name in tags:
+            tag = db.session.scalar(select(Tag).filter_by(name=tag_name))
+            if tag is None:
+                tag = Tag(name=tag_name)
+                db.session.add(tag)
+                db.session.commit()  # Commit after adding tags to make them available for appending
+            if tag not in photo.tags:
+                photo.tags.append(tag)
+
+        # Save the photo object to the database
         db.session.add(photo)
         db.session.commit()
+
+        flash('Photo uploaded successfully!', 'success')
+        return redirect(url_for('main.show_photo', photo_id=photo.id))
+
+    # Return the upload page for GET requests
     return render_template('main/upload.html')
+
+
+
 
 
 @main_bp.route('/photo/<int:photo_id>')
@@ -154,7 +210,12 @@ def show_photo(photo_id):
     comment_form = CommentForm()
     description_form = DescriptionForm()
     tag_form = TagForm()
+    caption = photo.description
+    description_form.description.data = photo.description
 
+    # Retrieve tags associated with the photo
+    tags = [tag.name for tag in photo.tags]
+    caption = photo.description
     description_form.description.data = photo.description
     return render_template(
         'main/photo.html',
