@@ -1,6 +1,6 @@
 # Moments
 
-A photo sharing social networking app built with Python and Flask. The example application for the book *[Python Web Development with Flask (2nd edition)](https://helloflask.com/en/book/4)* (《[Flask Web 开发实战（第 2 版）](https://helloflask.com/book/4)》).
+A photo sharing social networking app built with Python and Flask. 
 
 This project implements an image processing application with two key features:
 
@@ -79,7 +79,7 @@ The application requires two environment variables:
 
 VISION_ENDPOINT: The endpoint for the Azure Vision API.
 VISION_KEY: The subscription key for accessing the Azure Vision API.
-These variables have been added to the .env file, as mentioned in the Installation section.
+- [x] These variables have been added to the .env file, as mentioned in the Installation section.
 
 Features
 Alternative Text Generation
