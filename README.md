@@ -1,4 +1,4 @@
-# Moments
+# Moments - Photo Sharing Social Networking App
 
 A photo sharing social networking app built with Python and Flask. 
 
